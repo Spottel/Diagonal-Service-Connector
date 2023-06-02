@@ -17,6 +17,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
+pjson = require('./package.json');
 
 
 // ------------------------------------------
@@ -34,6 +35,9 @@ const errorlogging = require('./middleware/errorlogging.js');
 // Basic Web Server
 // ------------------------------------------
 const app = express();
+
+app.engine('html', require('ejs').renderFile);
+app.set('view engine', 'html');
 
 // ------------------------------------------
 //  Helper
@@ -62,7 +66,7 @@ const port = process.env.SERVER_PORT;
  * 
  */
 app.get('/administrator', userMiddleware.isLoggedIn, async (req, res) => {
-  res.sendFile(__dirname+"/public/administrator/index.html");
+  res.render(__dirname+"/public/administrator/index.html", {version: pjson.version});
 });
 
 /** 
