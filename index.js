@@ -1273,7 +1273,7 @@ cron.schedule('0 3 * * *', async function() {
   dayjs.extend(utc)
   dayjs.extend(timezone)
 
-  var date = dayjs().subtract(3, 'days').tz("Europe/Berlin").format('MM/DD/YYYY');
+  var date = dayjs().subtract(7, 'days').tz("Europe/Berlin").format('MM/DD/YYYY');
 
   var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
   docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
