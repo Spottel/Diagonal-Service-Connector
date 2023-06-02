@@ -786,7 +786,7 @@ app.post('/docusignwebhook', async (req, res) => {
           await database.awaitQuery(`INSERT INTO docu_sign_events (envelope_id, event) VALUES (?, ?)`, [response.data.envelopeId, response.event]);
         }
 
-        if(response.retryCount == 0){
+        //if(response.retryCount == 0){
             console.log("CHECKED", response);
         
             // Document accepted
@@ -796,96 +796,114 @@ app.post('/docusignwebhook', async (req, res) => {
               try {
                 var apiResponse = await hubspotClient.crm.deals.searchApi.doSearch(PublicObjectSearchRequest);
             
-                var dealId = apiResponse.results[0].id;
-                // Lead Deal Data
-                var properties = ['dealstage'];
-                var associations = ["contact"];
+                if(apiResponse.results[0]){
+                  var dealId = apiResponse.results[0].id;
+                  // Lead Deal Data
+                  var properties = ['dealstage'];
+                  var associations = ["contact"];
 
-                try {
-                  var dealData = await hubspotClient.crm.deals.basicApi.getById(dealId, properties, undefined, associations, false, undefined);
-                
-                  // Load Contact Data
-                  var contactId = dealData.associations.contacts.results[0].id;
-              
-                  var properties = ["export_software", "aktuelle_liste"];
-                
                   try {
-                    var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
-              
-                    var docuSignUrl = replacePlaceholder(await settings.getSettingData('docusigncontracturl'), {envelopeId:envelopeId, dealId:dealId});
-                    
-
-                    // Set Deal Stage and Deal URL
-                    var properties = {
-                      "docusign_url": docuSignUrl 
-                    };
-
-                    if(dealData.properties.dealstage != "closedwon"){
-                      properties['dealstage'] = "closedwon";
-                    }
-                    var SimplePublicObjectInput = { properties };
-                    await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
-              
-                    // Set Contact Data    
-                    var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
-                    docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
-
+                    var dealData = await hubspotClient.crm.deals.basicApi.getById(dealId, properties, undefined, associations, false, undefined);
+                  
+                    // Load Contact Data
+                    var contactId = dealData.associations.contacts.results[0].id;
+                
+                    var properties = ["export_software", "aktuelle_liste", "bankname", "bic", "iban", "kontoinhaber", "mwst"];
+                  
                     try {
-                      var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
-                      var accountId = userInfo.accounts[0].accountId;
-                      docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
-                      docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
-            
-                      // instantiate a new EnvelopesApi object
-                      var envelopesApi = new docusign.EnvelopesApi(docuSignApiClient);
-          
-          
-                      var results = await envelopesApi.getFormData(accountId, envelopeId);
-          
-                      var docuSignFormData = results.formData;
-                      var docuSignFormatData = {};
-          
-                      for(var i=0; i<docuSignFormData.length; i++){
-                        docuSignFormatData[docuSignFormData[i]['name']] = docuSignFormData[i]['value'];
-                      }
-          
+                      var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
+                
+                      var docuSignUrl = replacePlaceholder(await settings.getSettingData('docusigncontracturl'), {envelopeId:envelopeId, dealId:dealId});
+                      
+
+                      // Set Deal Stage and Deal URL
                       var properties = {
-                        "bankname": docuSignFormatData['Bank'],
-                        "bic": docuSignFormatData['BIC'],
-                        "iban": docuSignFormatData['IBAN'],
-                        "kontoinhaber": docuSignFormatData['Represent_Contract'],
-                        "mwst": docuSignFormatData['mwst']
+                        "docusign_url": docuSignUrl 
                       };
 
-                      if(contactData.properties.aktuelle_liste != "Abgeschlossen"){
-                        properties['aktuelle_liste'] = "Abgeschlossen";
-                      } 
-
-                      if(contactData.properties.export_software == "" || contactData.properties.export_software == "Nein" || contactData.properties.export_software == null || contactData.properties.export_software == "null"){
-                        properties['export_software'] = "Bereit";
-                      } 
-
+                      if(dealData.properties.dealstage != "closedwon"){
+                        properties['dealstage'] = "closedwon";
+                      }
                       var SimplePublicObjectInput = { properties };
+                      await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
+                
+                      // Set Contact Data    
+                      var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
+                      docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
 
-                      await hubspotClient.crm.contacts.basicApi.update(contactId, SimplePublicObjectInput, undefined);
+                      try {
+                        var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
+                        var accountId = userInfo.accounts[0].accountId;
+                        docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
+                        docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
+              
+                        // instantiate a new EnvelopesApi object
+                        var envelopesApi = new docusign.EnvelopesApi(docuSignApiClient);
+            
+            
+                        var results = await envelopesApi.getFormData(accountId, envelopeId);
+            
+                        var docuSignFormData = results.formData;
+                        var docuSignFormatData = {};
+            
+                        for(var i=0; i<docuSignFormData.length; i++){
+                          docuSignFormatData[docuSignFormData[i]['name']] = docuSignFormData[i]['value'];
+                        }
+            
+                        var properties = {};
 
+                        if(contactData.properties.bankname == "" || contactData.properties.bankname == null){
+                          properties['bankname'] = docuSignFormatData['Bank'];
+                        } 
 
-                      console.log(date+" - Success: Docu Sign Webhook Accepted Contract - "+envelopeId);
-                      errorlogging.saveError("success", "docusign", "Success: Docu Sign Webhook Accepted Contract", envelopeId);
-                      res.send(true);
+                        if(contactData.properties.bic == "" || contactData.properties.bic == null){
+                          properties['bic'] = docuSignFormatData['BIC'];
+                        } 
+
+                        if(contactData.properties.iban == "" || contactData.properties.iban == null){
+                          properties['iban'] = docuSignFormatData['IBAN'];
+                        } 
+
+                        if(contactData.properties.kontoinhaber == "" || contactData.properties.kontoinhaber == null){
+                          properties['kontoinhaber'] = docuSignFormatData['Represent_Contract'];
+                        } 
+
+                        if(contactData.properties.mwst == "" || contactData.properties.mwst == null){
+                          properties['mwst'] = docuSignFormatData['mwst'];
+                        } 
+
+                        if(contactData.properties.aktuelle_liste != "Abgeschlossen"){
+                          properties['aktuelle_liste'] = "Abgeschlossen";
+                        } 
+
+                        if(contactData.properties.export_software == "" || contactData.properties.export_software == "Nein" || contactData.properties.export_software == null || contactData.properties.export_software == "null"){
+                          properties['export_software'] = "Bereit";
+                        } 
+
+                        var SimplePublicObjectInput = { properties };
+
+                        if(Object.keys(properties).length != 0){
+                          await hubspotClient.crm.contacts.basicApi.update(contactId, SimplePublicObjectInput, undefined);
+
+                          console.log(date+" - Success: Docu Sign Webhook Accepted Contract - "+envelopeId);
+                          errorlogging.saveError("success", "docusign", "Success: Docu Sign Webhook Accepted Contract", envelopeId);
+                        }
+
+                        res.send(true);
+                      } catch (err) {
+                        errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", err);
+                        console.log(date+" - "+err);
+                      }
+        
                     } catch (err) {
-                      errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", err);
+                      errorlogging.saveError("error", "hubspot", "Error to load the Contact Data ("+contactId+")", err);
                       console.log(date+" - "+err);
                     }
-      
+                  
                   } catch (err) {
-                    errorlogging.saveError("error", "hubspot", "Error to load the Contact Data ("+contactId+")", err);
+                    errorlogging.saveError("error", "hubspot", "Error to load the Deal Data ("+deald+")", err);
                     console.log(date+" - "+err);
                   }
-                
-                } catch (err) {
-                  errorlogging.saveError("error", "hubspot", "Error to load the Deal Data ("+deald+")", err);
-                  console.log(date+" - "+err);
                 }      
               } catch (err) {
                 errorlogging.saveError("error", "hubspot", "Error to search Deal", err);
@@ -900,92 +918,113 @@ app.post('/docusignwebhook', async (req, res) => {
             
               try {
                 var apiResponse = await hubspotClient.crm.deals.searchApi.doSearch(PublicObjectSearchRequest);
-                var dealId = apiResponse.results[0].id;
 
-                // Lead Deal Data
-                var properties = ['deal_gesellschaft', 'dealstage'];
-                var associations = ["contact"];
-            
-                try {
-                  var dealData = await hubspotClient.crm.deals.basicApi.getById(dealId, properties, undefined, associations, false, undefined);
-                
-                  // Load Contact Data
-                  var contactId = dealData.associations.contacts.results[0].id;
+                if(apiResponse.results[0]){
+                  var dealId = apiResponse.results[0].id;
+
+                  // Lead Deal Data
+                  var properties = ['deal_gesellschaft', 'dealstage', 'docusign_absagedatum', 'docusign_absagedatum'];
+                  var associations = ["contact"];
               
-                  var properties = ["email", "firstname", "lastname", "company", "address", "zip", "city", "iban", "bic", "bankname"];
-                  
                   try {
-                    var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
-              
-                    // Set Contact Data    
-                    var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
-                    docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
-
+                    var dealData = await hubspotClient.crm.deals.basicApi.getById(dealId, properties, undefined, associations, false, undefined);
+                  
+                    // Load Contact Data
+                    var contactId = dealData.associations.contacts.results[0].id;
+                
+                    var properties = ["email", "firstname", "lastname", "company", "address", "zip", "city", "iban", "bic", "bankname"];
+                    
                     try {
-                      var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
-                      var accountId = userInfo.accounts[0].accountId;
-                      docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
-                      docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
+                      var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
+                
+                      // Set Contact Data    
+                      var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
+                      docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
 
-                      // instantiate a new EnvelopesApi object
-                      var envelopesApi = new docusign.EnvelopesApi(docuSignApiClient);
+                      try {
+                        var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
+                        var accountId = userInfo.accounts[0].accountId;
+                        docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
+                        docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
 
-                      var results = await envelopesApi.listRecipients(accountId, envelopeId);
-                      var declinedReason = results.signers[0].declinedReason; 
-                      var declinedDate = results.signers[0].declinedDateTime;
+                        // instantiate a new EnvelopesApi object
+                        var envelopesApi = new docusign.EnvelopesApi(docuSignApiClient);
 
-                      // Set Deal Stage
-                      var properties = {
-                        "docusign_absagegrund": declinedReason,
-                        "docusign_absagedatum": declinedDate
-                      };
+                        var results = await envelopesApi.listRecipients(accountId, envelopeId);
+                        var declinedReason = results.signers[0].declinedReason; 
+                        var declinedDate = results.signers[0].declinedDateTime;
 
-                      if(dealData.properties.dealstage != "closedlost"){
-                        properties['dealstage'] = "closedlost";
+                        if(!results.signers[0].declinedReason){
+                          declinedReason = results.signers[1].declinedReason; 
+                          declinedDate = results.signers[1].declinedDateTime;
+                        }
+
+                        // Set Deal Stage
+                        var properties = {};
+
+                        if(dealData.properties.docusign_absagegrund == "" || dealData.properties.docusign_absagegrund == null){
+                          properties['docusign_absagegrund'] = declinedReason;
+                        } 
+
+                        if(dealData.properties.docusign_absagedatum == "" || dealData.properties.docusign_absagedatum == null){
+                          properties['docusign_absagedatum'] = declinedDate;
+                        } 
+
+                        if(dealData.properties.dealstage != "closedlost"){
+                          properties['dealstage'] = "closedlost";
+                        }
+
+
+                        var SimplePublicObjectInput = { properties };
+
+
+                        if(Object.keys(properties).length != 0){
+                          await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
+
+                          errorlogging.saveError("success", "docusign", "Success: Docu Sign Webhook Canceled Contract", envelopeId);
+                          console.log(date+" - Success: Docu Sign Webhook Canceled Contract");
+                        }
+
+
+                        // Create Mail
+                        if(dealData.properties.docusign_absagedatum == "" || dealData.properties.docusign_absagedatum == null){
+                          if(dealData.properties['deal_gesellschaft'] == "DIS"){
+                            var mailSubject = replacePlaceholder(await settings.getSettingData('cancelmaildissubject'), contactData.properties);
+                            var mailBody = replacePlaceholder(await settings.getSettingData('cancelmaildistext'), contactData.properties);
+                          }else if(dealData.properties['deal_gesellschaft'] == "DIA"){
+                            var mailSubject = replacePlaceholder(await settings.getSettingData('cancelmaildiasubject'), contactData.properties);
+                            var mailBody = replacePlaceholder(await settings.getSettingData('cancelmaildiatext'), contactData.properties);
+                          }
+
+                          // SEND MAIL
+                          await mailer.sendMail(await settings.getSettingData('mailersentmail'), contactData.properties.email, mailSubject, mailBody, mailBody);
+                        }
+
+                        res.send(true);
+
+                      } catch (err) {
+                        errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", "");
+                        console.log(date+" - "+err);
                       }
-
-
-                      var SimplePublicObjectInput = { properties };
-                      await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
-
-                      errorlogging.saveError("success", "docusign", "Success: Docu Sign Webhook Canceled Contract", envelopeId);
-                      console.log(date+" - Success: Docu Sign Webhook Canceled Contract");
                     } catch (err) {
-                      errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", "");
+                      errorlogging.saveError("error", "hubspot", "Error to load the Contact Data ("+contactId+")", err);
                       console.log(date+" - "+err);
                     }
 
-                    // Create Mail
-                    if(dealData.properties['deal_gesellschaft'] == "DIS"){
-                      var mailSubject = replacePlaceholder(await settings.getSettingData('cancelmaildissubject'), contactData.properties);
-                      var mailBody = replacePlaceholder(await settings.getSettingData('cancelmaildistext'), contactData.properties);
-                    }else if(dealData.properties['deal_gesellschaft'] == "DIA"){
-                      var mailSubject = replacePlaceholder(await settings.getSettingData('cancelmaildiasubject'), contactData.properties);
-                      var mailBody = replacePlaceholder(await settings.getSettingData('cancelmaildiatext'), contactData.properties);
-                    }
-
-                    // SEND MAIL
-                    await mailer.sendMail(await settings.getSettingData('mailersentmail'), contactData.properties.email, mailSubject, mailBody, mailBody);
-
-                    res.send(true);
                   } catch (err) {
-                    errorlogging.saveError("error", "hubspot", "Error to load the Contact Data ("+contactId+")", err);
+                    errorlogging.saveError("error", "hubspot", "Error to load the Deal Data ("+dealId+")", err);
                     console.log(date+" - "+err);
-                  }
-
-                } catch (err) {
-                  errorlogging.saveError("error", "hubspot", "Error to load the Deal Data ("+dealId+")", err);
-                  console.log(date+" - "+err);
-                } 
+                  } 
+                }
               } catch (err) {
                 errorlogging.saveError("error", "hubspot", "Error to search the Deal", err);
                 console.log(date+" - "+err);
               }
             }
           
-        }else{
-          res.send(true);
-        }
+        //}else{
+        //  res.send(true);
+        //}
       }
     
     }else{
@@ -1208,8 +1247,11 @@ cron.schedule('*/15 * * * *', async function() {
 
 
 
-// Check Hubspot Leads Contract
-async function test(){
+/** 
+ * Check wrong Hubspot DocuSign Contracts
+ * 
+ */
+cron.schedule('0 3 * * *', async function() {
   const hubspotClient = new hubspot.Client({ "accessToken": await settings.getSettingData('hubspotaccesstoken') });
 
   if(await settings.getSettingData('docusignenvironment') == "true"){
@@ -1223,171 +1265,175 @@ async function test(){
   }
 
 
-  //var PublicObjectSearchRequest = { filterGroups: [{"filters":[{"value": "closedwon", "propertyName":"dealstage","operator":"EQ"}, {"propertyName":"deal_envelopeid","operator":"HAS_PROPERTY"}, {"propertyName":"docusign_url","operator":"NOT_HAS_PROPERTY"}]}], properties:['docusign_url', 'deal_envelopeid'], limit: 1, after: 0 };
-  var PublicObjectSearchRequest = { filterGroups: [{"filters":[{"value": "envelope-completed", "propertyName":"docusign_envelope_status","operator":"EQ"}, {"propertyName":"deal_envelopeid","operator":"HAS_PROPERTY"}, {"propertyName":"docusign_url","operator":"NOT_HAS_PROPERTY"}]}], properties:['docusign_url', 'deal_envelopeid'], limit: 100, after: 0 };
+  // Check Deal Envelope Status  
+  dayjs.extend(utc)
+  dayjs.extend(timezone)
 
+  var date = dayjs().subtract(3, 'days').tz("Europe/Berlin").format('MM/DD/YYYY');
+
+  var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
+  docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
+
+  try {
+    var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
+    var accountId = userInfo.accounts[0].accountId;
+    docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
+    docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
+    var envelopesApi = new docusign.EnvelopesApi(docuSignApiClient);
+
+    let envelopesInformation = await envelopesApi.listStatusChanges(accountId, {fromDate:date});
+              
+    for(var i=0; i<envelopesInformation.totalSetSize; i++){
+      var PublicObjectSearchRequest = { filterGroups: [{"filters":[{"value": envelopesInformation.envelopes[i].envelopeId, "propertyName":"deal_envelopeid","operator":"EQ"}]}], properties:['docusign_url', 'deal_envelopeid', 'dealname', 'docusign_envelope_status'], limit: 100, after: 0 };
+      var apiResponse = await hubspotClient.crm.deals.searchApi.doSearch(PublicObjectSearchRequest);   
+
+      if(typeof apiResponse.results[0] !== 'undefined'){
+        if(apiResponse.results[0].properties.docusign_envelope_status != "envelope-"+envelopesInformation.envelopes[i].status){
+          // Set Deal Envelope Status
+          var properties = {
+            "docusign_envelope_status": "envelope-"+envelopesInformation.envelopes[i].status
+          };
+
+          var SimplePublicObjectInput = { properties };
+          await hubspotClient.crm.deals.basicApi.update(apiResponse.results[0].id, SimplePublicObjectInput, undefined);
+        }
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+  }catch(err){
+    console.log(err);
+  }
+
+
+
+  // Check Deals with no DocuSign URL
+  var PublicObjectSearchRequest = { filterGroups: [{"filters":[{"value": "envelope-completed", "propertyName":"docusign_envelope_status","operator":"EQ"}, {"propertyName":"deal_envelopeid","operator":"HAS_PROPERTY"}, {"propertyName":"docusign_url","operator":"NOT_HAS_PROPERTY"}]}], properties:['docusign_url', 'deal_envelopeid', 'dealname'], limit: 100, after: 0 };
 
   try {
     var apiResponse = await hubspotClient.crm.deals.searchApi.doSearch(PublicObjectSearchRequest);    
+       
+    dayjs.extend(utc)
+    dayjs.extend(timezone)
+    var date = dayjs().tz("Europe/Berlin").format('YYYY-MM-DD HH:mm:ss');
     
-    console.log(apiResponse.total);
 
     for(var i=0; i<apiResponse.total;i++){
-      console.log(apiResponse.results[i]);
-
-      //var docuSignUrl = replacePlaceholder('https://hubspot.diagonal-service.de/showdocusigndocument?envelopeId={envelopeId}&dealId={dealId}', {envelopeId:apiResponse.results[i].properties.deal_envelopeid, dealId:apiResponse.results[i].id});
-      //console.log(docuSignUrl);
-
-
-
-
-
-
-
-/*
-// Document accepted
-if(response.event == "envelope-completed"){
-  var PublicObjectSearchRequest = { filterGroups: [{"filters":[{"value":envelopeId, "propertyName":"deal_envelopeid","operator":"EQ"}]}], limit: 1, after: 0 };
-
-  try {
-    var apiResponse = await hubspotClient.crm.deals.searchApi.doSearch(PublicObjectSearchRequest);
-
-    var dealId = apiResponse.results[0].id;
-    // Lead Deal Data
-    var properties = ['dealstage'];
-    var associations = ["contact"];
-
-    try {
-      var dealData = await hubspotClient.crm.deals.basicApi.getById(dealId, properties, undefined, associations, false, undefined);
-    
-      // Load Contact Data
-      var contactId = dealData.associations.contacts.results[0].id;
-  
-      var properties = ["export_software", "aktuelle_liste"];
-    
+      var dealId = apiResponse.results[i].id;
+      var envelopeId = apiResponse.results[i].properties.deal_envelopeid;
+      // Lead Deal Data
+      var properties = ['dealstage'];
+      var associations = ["contact"];
+   
       try {
-        var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
-  
-        var docuSignUrl = replacePlaceholder(await settings.getSettingData('docusigncontracturl'), {envelopeId:envelopeId, dealId:dealId});
-        
-
-        // Set Deal Stage and Deal URL
-        var properties = {
-          "docusign_url": docuSignUrl 
-        };
-
-        if(dealData.properties.dealstage != "closedwon"){
-          properties['dealstage'] = "closedwon";
-        }
-        var SimplePublicObjectInput = { properties };
-        await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
-  
-        // Set Contact Data    
-        var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
-        docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
+        var dealData = await hubspotClient.crm.deals.basicApi.getById(dealId, properties, undefined, associations, false, undefined);
+      
+        // Load Contact Data
+        var contactId = dealData.associations.contacts.results[0].id;
+    
+        var properties = ["export_software", "aktuelle_liste", "bankname", "bic", "iban", "kontoinhaber", "mwst"];
 
         try {
-          var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
-          var accountId = userInfo.accounts[0].accountId;
-          docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
-          docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
-
-          // instantiate a new EnvelopesApi object
-          var envelopesApi = new docusign.EnvelopesApi(docuSignApiClient);
+          var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
+    
+          var docuSignUrl = replacePlaceholder(await settings.getSettingData('docusigncontracturl'), {envelopeId:envelopeId, dealId:dealId});
 
 
-          var results = await envelopesApi.getFormData(accountId, envelopeId);
-
-          var docuSignFormData = results.formData;
-          var docuSignFormatData = {};
-
-          for(var i=0; i<docuSignFormData.length; i++){
-            docuSignFormatData[docuSignFormData[i]['name']] = docuSignFormData[i]['value'];
-          }
-
+          // Set Deal Stage and Deal URL
           var properties = {
-            "bankname": docuSignFormatData['Bank'],
-            "bic": docuSignFormatData['BIC'],
-            "iban": docuSignFormatData['IBAN'],
-            "kontoinhaber": docuSignFormatData['Represent_Contract'],
-            "mwst": docuSignFormatData['mwst']
+            "docusign_url": docuSignUrl 
           };
 
-          if(contactData.properties.aktuelle_liste != "Abgeschlossen"){
-            properties['aktuelle_liste'] = "Abgeschlossen";
-          } 
-
-          if(contactData.properties.export_software == "" || contactData.properties.export_software == "Nein" || contactData.properties.export_software == null || contactData.properties.export_software == "null"){
-            properties['export_software'] = "Bereit";
-          } 
+          if(dealData.properties.dealstage != "closedwon"){
+            properties['dealstage'] = "closedwon";
+          }
 
           var SimplePublicObjectInput = { properties };
+          await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
+    
+          // Set Contact Data    
+          var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
+          docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
 
-          await hubspotClient.crm.contacts.basicApi.update(contactId, SimplePublicObjectInput, undefined);
+          try {
+            var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
+            var accountId = userInfo.accounts[0].accountId;
+            docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
+            docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
+
+            // instantiate a new EnvelopesApi object
+            var envelopesApi = new docusign.EnvelopesApi(docuSignApiClient);
 
 
-          console.log(date+" - Success: Docu Sign Webhook Accepted Contract - "+envelopeId);
-          errorlogging.saveError("success", "docusign", "Success: Docu Sign Webhook Accepted Contract", envelopeId);
-          res.send(true);
+            var results = await envelopesApi.getFormData(accountId, envelopeId);
+
+            var docuSignFormData = results.formData;
+            var docuSignFormatData = {};
+
+            for(var a=0; a<docuSignFormData.length; a++){
+              docuSignFormatData[docuSignFormData[a]['name']] = docuSignFormData[a]['value'];
+            }
+
+            var properties = {};
+
+            if(contactData.properties.bankname == "" || contactData.properties.bankname == null){
+              properties['bankname'] = docuSignFormatData['Bank'];
+            } 
+
+            if(contactData.properties.bic == "" || contactData.properties.bic == null){
+              properties['bic'] = docuSignFormatData['BIC'];
+            } 
+
+            if(contactData.properties.iban == "" || contactData.properties.iban == null){
+              properties['iban'] = docuSignFormatData['IBAN'];
+            } 
+
+            if(contactData.properties.kontoinhaber == "" || contactData.properties.kontoinhaber == null){
+              properties['kontoinhaber'] = docuSignFormatData['Represent_Contract'];
+            } 
+
+            if(contactData.properties.mwst == "" || contactData.properties.mwst == null){
+              properties['mwst'] = docuSignFormatData['mwst'];
+            } 
+
+            if(contactData.properties.aktuelle_liste != "Abgeschlossen"){
+              properties['aktuelle_liste'] = "Abgeschlossen";
+            } 
+
+            if(contactData.properties.export_software == "" || contactData.properties.export_software == "Nein" || contactData.properties.export_software == null || contactData.properties.export_software == "null"){
+              properties['export_software'] = "Bereit";
+            } 
+
+            var SimplePublicObjectInput = { properties };
+
+            if(Object.keys(properties).length != 0){
+              await hubspotClient.crm.contacts.basicApi.update(contactId, SimplePublicObjectInput, undefined);
+
+              console.log(date+" - Success: Docu Sign Checker Accepted Contract - "+envelopeId);
+              errorlogging.saveError("success", "docusign", "Success: Docu Sign Checker Accepted Contract", envelopeId);
+            }
+          } catch (err) {
+            errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", err);
+            console.log(date+" - "+err);
+          }         
+
         } catch (err) {
-          errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", err);
+          errorlogging.saveError("error", "hubspot", "Error to load the Contact Data ("+contactId+")", err);
           console.log(date+" - "+err);
         }
-
+        
+      
       } catch (err) {
-        errorlogging.saveError("error", "hubspot", "Error to load the Contact Data ("+contactId+")", err);
+        errorlogging.saveError("error", "hubspot", "Error to load the Deal Data ("+deald+")", err);
         console.log(date+" - "+err);
-      }
-    
-    } catch (err) {
-      errorlogging.saveError("error", "hubspot", "Error to load the Deal Data ("+deald+")", err);
-      console.log(date+" - "+err);
-    }      
-  } catch (err) {
-    errorlogging.saveError("error", "hubspot", "Error to search Deal", err);
-    console.log(date+" - "+err);
-  }
-}
-*/
-
-
-
-
-
-
-
-
-
-
-
+      }      
     }
-
 
   } catch (err) {
     console.log(err);
   }  
 
-
-
-  // Empty Docu Sign Url
-
-
-  // Docu Sign Contract Status
-
-
-
-}
-
-
-test();
-
-
-
-
-
-
-
-
+});
 
 
 // ------------------------------------------
