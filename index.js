@@ -433,13 +433,20 @@ app.post('/hubspotwebhook', async (req, res) => {
               // Load Contact Data
               var contactId = dealData.associations.contacts.results[0].id;
 
-              var properties = ["email", "firstname", "lastname", "company", "address", "zip", "city", "iban", "bic", "bankname"];
+              var properties = ["email", "firstname", "lastname", "company", "address", "zip", "city", "iban", "bic", "bankname", "unternehmensform"];
               
               try {
                 var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
 
                 if(contactData.properties.company == null || contactData.properties.company == ""){
                   contactData.properties.company = contactData.properties.firstname+' '+contactData.properties.lastname;
+                }
+
+                // Check company type
+                var represent_contract_company = '';
+
+                if(contactData.properties.unternehmensform == "einzelunternehmen"){
+                  represent_contract_company = " (Inhaber/-in)";
                 }
 
                 // Check Gesellschaft
@@ -502,7 +509,7 @@ app.post('/hubspotwebhook', async (req, res) => {
 
                   var nTab = new docusign.Text();
                   nTab.tabLabel = "Represent_Contract";
-                  nTab.value = contactData.properties.firstname+' '+contactData.properties.lastname;
+                  nTab.value = contactData.properties.firstname+' '+contactData.properties.lastname+represent_contract_company;
                   tRole.tabs.textTabs.push(nTab);
 
                   var nTab = new docusign.Text();
@@ -535,7 +542,7 @@ app.post('/hubspotwebhook', async (req, res) => {
 
                   var nTab = new docusign.Text();
                   nTab.tabLabel = "Represent_Vollmacht";
-                  nTab.value = contactData.properties.firstname+' '+contactData.properties.lastname;
+                  nTab.value = contactData.properties.firstname+' '+contactData.properties.lastname+represent_contract_company;
                   tRole.tabs.textTabs.push(nTab);
 
                   var nTab = new docusign.Text();
