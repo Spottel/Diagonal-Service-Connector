@@ -1342,7 +1342,7 @@ cron.schedule('0 3 * * *', async function() {
         // Load Contact Data
         var contactId = dealData.associations.contacts.results[0].id;
     
-        var properties = ["export_software", "aktuelle_liste", "bankname", "bic", "iban", "kontoinhaber", "mwst"];
+        var properties = ["export_software", "aktuelle_liste", "bankname", "bic", "iban", "kontoinhaber", "mwst", "firstname", "lastname"];
 
         try {
           var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
@@ -1400,7 +1400,7 @@ cron.schedule('0 3 * * *', async function() {
             } 
 
             if(contactData.properties.kontoinhaber == "" || contactData.properties.kontoinhaber == null){
-              properties['kontoinhaber'] = docuSignFormatData['Represent_Contract'];
+              properties['kontoinhaber'] = contactData.properties.firstname+" "+contactData.properties.lastname;
             } 
 
             if(contactData.properties.mwst == "" || contactData.properties.mwst == null){
