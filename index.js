@@ -30,6 +30,7 @@ const database = databaseConnector.getConnection();
 const settings = require('./middleware/settings.js');
 const mailer = require('./middleware/mailer.js');
 const errorlogging = require('./middleware/errorlogging.js');
+const { CollectionResponseFolder } = require('@hubspot/api-client/lib/codegen/files');
 
 // ------------------------------------------
 // Basic Web Server
@@ -381,6 +382,8 @@ app.get('/registerHubSpotApp', async (req, res) => {
  * 
  */
 app.post('/hubspotwebhook', async (req, res) => {
+  const hubspotClient = new hubspot.Client({ "accessToken": await settings.getSettingData('hubspotaccesstoken') });
+
   if(await settings.getSettingData('docusignenvironment') == "true"){
     var docuSignApiClient = new docusign.ApiClient({
       basePath: restApi.BasePath.PRODUCTION
@@ -403,6 +406,7 @@ app.post('/hubspotwebhook', async (req, res) => {
 
     if(gen_hash == req.headers['x-hubspot-signature']){
       var body = req.body[0];
+
 
       if (body.subscriptionType) {
       
@@ -642,6 +646,111 @@ app.post('/hubspotwebhook', async (req, res) => {
 
           console.log(date+" - SEND DOCUSIGN CONTRACT");
         }
+
+        // Check Import Error
+        if(body.subscriptionType == "contact.propertyChange" && body.propertyName == "export_software" && body.propertyValue == "Fehler"){
+          var contactId = body.objectId;
+
+          var properties = ["email", "firstname", "lastname", "company", "address", "zip", "city", "iban", "bic", "bankname", "kontoinhaber"];
+          var associations = ["deal"];
+                    
+          try {
+            var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, associations, false);
+            var envelopeId = "";
+            var dealId = "";
+
+            // Check Contact Deals
+            if(contactData.associations.deals.results.length != 0){
+              for(var i=contactData.associations.deals.results.length-1; i>=0; i--){
+                var contactDealData = contactData.associations.deals.results[i];
+              
+                var properties = ["dealstage", "deal_envelopeid"];
+                var dealData = await hubspotClient.crm.deals.basicApi.getById(contactDealData.id, properties, undefined, undefined, false);
+
+                if(dealData.properties.dealstage == "closedwon"){
+                  if(dealData.properties.deal_envelopeid != "" || dealData.properties.deal_envelopeid != null){
+                    envelopeId = dealData.properties.deal_envelopeid;
+                    dealId = dealData.id;
+                  }
+                }
+              }
+            }
+
+            // If Deal exists
+            if(envelopeId != ""){
+              // Set Contact Data    
+              var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
+              docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
+
+              try {
+                var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
+                var accountId = userInfo.accounts[0].accountId;
+                docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
+                docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
+      
+                // instantiate a new EnvelopesApi object
+                var envelopesApi = new docusign.EnvelopesApi(docuSignApiClient);
+    
+    
+                var results = await envelopesApi.getFormData(accountId, envelopeId);
+    
+                var docuSignFormData = results.formData;
+                var docuSignFormatData = {};
+    
+                for(var i=0; i<docuSignFormData.length; i++){
+                  docuSignFormatData[docuSignFormData[i]['name']] = docuSignFormData[i]['value'];
+                }
+                var properties = {};
+                var changeValue = false;
+
+
+                if(contactData.properties.bankname == "" || contactData.properties.bankname == null){
+                  properties['bankname'] = docuSignFormatData['Bank'];
+                  changeValue = true;
+                } 
+
+                if(contactData.properties.bic == "" || contactData.properties.bic == null){
+                  properties['bic'] = docuSignFormatData['BIC'];
+                  changeValue = true;
+                } 
+
+                if(contactData.properties.iban == "" || contactData.properties.iban == null){
+                  properties['iban'] = docuSignFormatData['IBAN'];
+                  changeValue = true;
+                } 
+
+                if(contactData.properties.kontoinhaber == "" || contactData.properties.kontoinhaber == null){
+                  properties['kontoinhaber'] = contactData.properties.firstname+" "+contactData.properties.lastname;
+                  changeValue = true;
+                } 
+
+                if(contactData.properties.mwst == "" || contactData.properties.mwst == null){
+                  properties['mwst'] = docuSignFormatData['mwst'];
+                } 
+
+                if(changeValue){
+                  properties['export_software'] = "Bereit";
+                } 
+
+                var SimplePublicObjectInput = { properties };
+
+                if(Object.keys(properties).length != 0){
+                  await hubspotClient.crm.contacts.basicApi.update(contactId, SimplePublicObjectInput, undefined);
+
+                  console.log(date+" - Success: Correct contact export error - "+contactData.properties.email);
+                  errorlogging.saveError("success", "docusign", "Success: Correct contact export error", contactData.properties.email);
+                }
+              } catch (err) {
+                errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", err);
+                console.log(date+" - "+err);
+              }
+            }
+
+          } catch (err) {
+            errorlogging.saveError("error", "hubspot", "Error to search Contact", err);
+            console.log(date+" - "+err);
+          }
+        }
       }
     }else{
       //errorlogging.saveError("error", "hubspot", "Error to with HMAC Key", "");
@@ -862,21 +971,26 @@ app.post('/docusignwebhook', async (req, res) => {
                         }
             
                         var properties = {};
+                        var changeValue = false;
 
                         if(contactData.properties.bankname == "" || contactData.properties.bankname == null){
                           properties['bankname'] = docuSignFormatData['Bank'];
+                          changeValue = true;
                         } 
 
                         if(contactData.properties.bic == "" || contactData.properties.bic == null){
                           properties['bic'] = docuSignFormatData['BIC'];
+                          changeValue = true;
                         } 
 
                         if(contactData.properties.iban == "" || contactData.properties.iban == null){
                           properties['iban'] = docuSignFormatData['IBAN'];
+                          changeValue = true;
                         } 
 
                         if(contactData.properties.kontoinhaber == "" || contactData.properties.kontoinhaber == null){
                           properties['kontoinhaber'] = contactData.properties.firstname+" "+contactData.properties.lastname;
+                          changeValue = true;
                         } 
 
                         if(contactData.properties.mwst == "" || contactData.properties.mwst == null){
@@ -887,7 +1001,7 @@ app.post('/docusignwebhook', async (req, res) => {
                           properties['aktuelle_liste'] = "Abgeschlossen";
                         } 
 
-                        if(contactData.properties.export_software == "" || contactData.properties.export_software == "Nein" || contactData.properties.export_software == null || contactData.properties.export_software == "null"){
+                        if(changeValue || contactData.properties.export_software == "" || contactData.properties.export_software == "Nein" || contactData.properties.export_software == null || contactData.properties.export_software == "null"){
                           properties['export_software'] = "Bereit";
                         } 
 
@@ -1262,7 +1376,7 @@ cron.schedule('*/15 * * * *', async function() {
  * Check wrong Hubspot DocuSign Contracts
  * 
  */
-cron.schedule('0 3 * * *', async function() {
+cron.schedule('0 * * * *', async function() {
   const hubspotClient = new hubspot.Client({ "accessToken": await settings.getSettingData('hubspotaccesstoken') });
 
   if(await settings.getSettingData('docusignenvironment') == "true"){
@@ -1386,21 +1500,26 @@ cron.schedule('0 3 * * *', async function() {
             }
 
             var properties = {};
+            var changeValue = false;
 
             if(contactData.properties.bankname == "" || contactData.properties.bankname == null){
               properties['bankname'] = docuSignFormatData['Bank'];
+              changeValue = true;
             } 
 
             if(contactData.properties.bic == "" || contactData.properties.bic == null){
               properties['bic'] = docuSignFormatData['BIC'];
+              changeValue = true;
             } 
 
             if(contactData.properties.iban == "" || contactData.properties.iban == null){
               properties['iban'] = docuSignFormatData['IBAN'];
+              changeValue = true;
             } 
 
             if(contactData.properties.kontoinhaber == "" || contactData.properties.kontoinhaber == null){
               properties['kontoinhaber'] = contactData.properties.firstname+" "+contactData.properties.lastname;
+              changeValue = true;
             } 
 
             if(contactData.properties.mwst == "" || contactData.properties.mwst == null){
@@ -1411,7 +1530,7 @@ cron.schedule('0 3 * * *', async function() {
               properties['aktuelle_liste'] = "Abgeschlossen";
             } 
 
-            if(contactData.properties.export_software == "" || contactData.properties.export_software == "Nein" || contactData.properties.export_software == null || contactData.properties.export_software == "null"){
+            if(changeValue || contactData.properties.export_software == "" || contactData.properties.export_software == "Nein" || contactData.properties.export_software == null || contactData.properties.export_software == "null"){
               properties['export_software'] = "Bereit";
             } 
 
