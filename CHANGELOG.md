@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/Spottel/Diagonal-Service-Connector/compare/v1.0.0...v1.1.0) (2023-06-30)
+
+
+### Features
+
+* :sparkles: Add position in contract ([80a727f](https://github.com/Spottel/Diagonal-Service-Connector/commit/80a727f63eb878edc89ad1a93df32f5d097de4f7))
+
 ## 1.0.0 (2023-06-02)
 
 
