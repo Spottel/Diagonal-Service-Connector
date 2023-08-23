@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/Spottel/Diagonal-Service-Connector/compare/v1.1.0...v1.1.1) (2023-08-23)
+
+
+### Bug Fixes
+
+* :bug: Remove bug in saltybrands import ([bcc7ebc](https://github.com/Spottel/Diagonal-Service-Connector/commit/bcc7ebcb40b7b682a92cf870dc48c72d838105cc))
+
 ## [1.1.0](https://github.com/Spottel/Diagonal-Service-Connector/compare/v1.0.0...v1.1.0) (2023-06-30)
 
 
