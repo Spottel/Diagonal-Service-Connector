@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.1](https://github.com/Spottel/Diagonal-Service-Connector/compare/v1.1.0...v1.1.1) (2023-08-23)
+
+
+### Bug Fixes
+
+* :bug: Remove bug in saltybrands import ([bcc7ebc](https://github.com/Spottel/Diagonal-Service-Connector/commit/bcc7ebcb40b7b682a92cf870dc48c72d838105cc))
+
+## [1.1.0](https://github.com/Spottel/Diagonal-Service-Connector/compare/v1.0.0...v1.1.0) (2023-06-30)
+
+
+### Features
+
+* :sparkles: Add position in contract ([80a727f](https://github.com/Spottel/Diagonal-Service-Connector/commit/80a727f63eb878edc89ad1a93df32f5d097de4f7))
+
+## 1.0.0 (2023-06-02)
+
+
+### Features
+
+* :sparkles: Check for hubspot contacts and deals with wrong docusign contracts ([01eea08](https://github.com/Spottel/Diagonal-Service-Connector/commit/01eea0853960aec48cf18785639abb9592b48a22))
+* :sparkles: Show version in the settings ([bac3d30](https://github.com/Spottel/Diagonal-Service-Connector/commit/bac3d3040649cd6abcac2ebd459834e8f557d31f))
+
 ## [1.3.0](https://github.com/Spottel/Diagonal-Service-Connector/compare/v1.2.0...v1.3.0) (2023-05-06)
 
 
