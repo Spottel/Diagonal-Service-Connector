@@ -426,14 +426,6 @@ app.post('/hubspotwebhook', async (req, res) => {
             // Check if Contract already sent
             if(dealData.properties['docusign_contract_status'] == null || dealData.properties['docusign_contract_status'] == ""){
               
-              // Set DocuSign Contract Status
-              var properties = {
-                "docusign_contract_status": "in Bearbeitung",
-              };
-              var SimplePublicObjectInput = { properties };
-              await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
-              
-                      
               // Load Contact Data
               var contactId = dealData.associations.contacts.results[0].id;
 
@@ -441,6 +433,25 @@ app.post('/hubspotwebhook', async (req, res) => {
               
               try {
                 var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
+
+
+
+
+
+                // Set DocuSign Contract Status
+                var properties = {
+                  "docusign_contract_status": "in Bearbeitung",
+                };
+                var SimplePublicObjectInput = { properties };
+                await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
+
+
+
+
+
+
+
+
 
                 if(contactData.properties.company == null || contactData.properties.company == ""){
                   contactData.properties.company = contactData.properties.firstname+' '+contactData.properties.lastname;
@@ -1259,7 +1270,7 @@ app.get('/showdocusigndocument', async (req, res) => {
  * Cronjob to import the saltybrands lead from googlesheets
  * 
  */
-cron.schedule('*/15 * * * *', async function() {
+cron.schedule('*/5 * * * *', async function() {
   const hubspotClient = new hubspot.Client({ "accessToken": await settings.getSettingData('hubspotaccesstoken') });
 
   dayjs.extend(utc)
@@ -1316,7 +1327,7 @@ cron.schedule('*/15 * * * *', async function() {
     
           var properties = {
               "company": obj['Firmenname'],
-              "email": obj['E-Mail'],
+              "email": obj['E-Mail'].trim(),
               "firstname": obj['Vorname'],
               "lastname": obj['Nachname'],
               "phone": phone,
@@ -1332,7 +1343,6 @@ cron.schedule('*/15 * * * *', async function() {
     
           var SimplePublicObjectInput = { properties };
 
-          
           try {
             var apiResponse = await hubspotClient.crm.contacts.basicApi.create(SimplePublicObjectInput); 
 
@@ -1354,11 +1364,18 @@ cron.schedule('*/15 * * * *', async function() {
             errorlogging.saveError("success", "saltybrands", "Google Sheet SaltyBrands Import. ("+obj['E-Mail']+")", "");
           } catch (err) {
             if(err.body['message'].includes("Contact already exists")){
+              var response = (await sheets.spreadsheets.values.update({
+                spreadsheetId: await settings.getSettingData('googlesheetid'),
+                range: "LinkedIn!W"+(i+1),
+                valueInputOption: "USER_ENTERED",
+                requestBody: { values: [["success"]] },
+              })).data;
+
               errorlogging.saveError("error", "saltybrands", "Contact already exists. ("+obj['E-Mail']+")", "");
             }else{
-              errorlogging.saveError("error", "saltybrands", "Not possibe to import. ("+obj['E-Mail']+")", error);
+              errorlogging.saveError("error", "saltybrands", "Not possibe to import. ("+obj['E-Mail']+")", err.body['message']);
             }
-          }            
+          }        
         }
       }
     }
