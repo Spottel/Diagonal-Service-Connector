@@ -434,218 +434,237 @@ app.post('/hubspotwebhook', async (req, res) => {
               try {
                 var contactData = await hubspotClient.crm.contacts.basicApi.getById(contactId, properties, undefined, undefined, false);
 
+                // Check before create contract
+                var checkField = true;
+                var field_list = [];
+                var requireFields = ["email", "firstname", "lastname", "unternehmensform"];
 
-
-
-
-                // Set DocuSign Contract Status
-                var properties = {
-                  "docusign_contract_status": "in Bearbeitung",
-                };
-                var SimplePublicObjectInput = { properties };
-                await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
-
-
-
-
-
-
-
-
-
-                if(contactData.properties.company == null || contactData.properties.company == ""){
-                  contactData.properties.company = contactData.properties.firstname+' '+contactData.properties.lastname;
+                for(var i=0; i<requireFields.length; i++){
+                  if(contactData.properties[requireFields[i]] == null || contactData.properties[requireFields[i]] == ""){
+                    checkField = false;
+                    field_list.push(requireFields[i]);
+                  }
                 }
 
-                // Check company type
-                var represent_contract_company = '';
 
-                if(contactData.properties.unternehmensform == "einzelunternehmen"){
-                  represent_contract_company = " (Inhaber/-in)";
-                }
+                if(!checkField){
+                  var field_list_string = field_list.join(', ')
 
-                // Check Gesellschaft
-                if(dealData.properties['deal_gesellschaft'] == "DIS"){
-                  var contractTemplateId = await settings.getSettingData('docusigndiscontracttemplateId');
-
-                  var mailSubject = replacePlaceholder(await settings.getSettingData('docusigndismailsubject'), contactData.properties);
-
-                  var mailBody = replacePlaceholder(await settings.getSettingData('docusigndismailbody'), contactData.properties);
-
-                }else if(dealData.properties['deal_gesellschaft'] == "DIA"){
-                  var contractTemplateId = await settings.getSettingData('docusigndiacontracttemplateId');
-
-                  var mailSubject = replacePlaceholder(await settings.getSettingData('docusigndiamailsubject'), contactData.properties);
-                  
-                  var mailBody = replacePlaceholder(await settings.getSettingData('docusigndiamailbody'), contactData.properties);
-                }
-
-                // Sent Contract
-                var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
-                docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
-
-                try {
-                  var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
-                  var accountId = userInfo.accounts[0].accountId;
-                  docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
-                  docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
+                  // Set DocuSign Contract Status
+                  var properties = {
+                    "docusign_contract_status": "nicht gesendet",
+                    "dealstage": "qualifiedtobuy",
+                    "docusign_contract_status_fehler": "Ein Pflichtfeld wurde nicht ausgefüllt. ("+field_list_string+")"
+                  };
+                  var SimplePublicObjectInput = { properties };
+                  await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
+                }else{
+                  // Set DocuSign Contract Status
+                  var properties = {
+                    "docusign_contract_status": "in Bearbeitung",
+                    "docusign_contract_status_fehler": ""
+                  };
+                  var SimplePublicObjectInput = { properties };
+                  await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
 
 
+                  if(contactData.properties.company == null || contactData.properties.company == ""){
+                    contactData.properties.company = contactData.properties.firstname+' '+contactData.properties.lastname;
+                  }
 
-                  console.log(date+" - done retrieving account info for user.");
+                  // Check company type
+                  var represent_contract_company = '';
 
-                  // create a new envelope object that we will manage the signature request through
-                  var envDef = new docusign.EnvelopeDefinition();
-                  envDef.emailSubject = mailSubject;
-                  envDef.templateId = contractTemplateId;
-                  envDef.emailBlurb = mailBody;
+                  if(contactData.properties.unternehmensform == "einzelunternehmen"){
+                    represent_contract_company = " (Inhaber/-in)";
+                  }
 
+                  // Check Gesellschaft
+                  if(dealData.properties['deal_gesellschaft'] == "DIS"){
+                    var contractTemplateId = await settings.getSettingData('docusigndiscontracttemplateId');
 
-                  // create a template role with a valid templateId and roleName and assign signer info
-                  var tRole = new docusign.TemplateRole();
-                  tRole.roleName = 'HubSpot';
-                  tRole.name = contactData.properties.firstname+' '+contactData.properties.lastname;
-                  tRole.email = contactData.properties.email;
+                    var mailSubject = replacePlaceholder(await settings.getSettingData('docusigndismailsubject'), contactData.properties);
 
+                    var mailBody = replacePlaceholder(await settings.getSettingData('docusigndismailbody'), contactData.properties);
 
-                  // Set Template Fields
-                  tRole.tabs = new docusign.Tabs();
-                  tRole.tabs.textTabs = [];
-                  
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Firma_Contract";
-                  nTab.value = contactData.properties.company;
-                  tRole.tabs.textTabs.push(nTab);
+                  }else if(dealData.properties['deal_gesellschaft'] == "DIA"){
+                    var contractTemplateId = await settings.getSettingData('docusigndiacontracttemplateId');
 
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Address_Contract";
-                  nTab.value = contactData.properties.address;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Represent_Contract";
-                  nTab.value = contactData.properties.firstname+' '+contactData.properties.lastname+represent_contract_company;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Plz_Contract";
-                  nTab.value = contactData.properties.zip;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Postalcode_Contract";
-                  nTab.value = contactData.properties.zip;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "City_Contract";
-                  nTab.value = contactData.properties.city;
-                  tRole.tabs.textTabs.push(nTab);
-
-
-
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Firma_Vollmacht";
-                  nTab.value = contactData.properties.company;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Address_Vollmacht";
-                  nTab.value = contactData.properties.address;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Represent_Vollmacht";
-                  nTab.value = contactData.properties.firstname+' '+contactData.properties.lastname+represent_contract_company;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Plz_Vollmacht";
-                  nTab.value = contactData.properties.zip;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Postalcode_Vollmacht";
-                  nTab.value = contactData.properties.zip;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "City_Vollmacht";
-                  nTab.value = contactData.properties.city;
-                  tRole.tabs.textTabs.push(nTab);
-
-
-
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "IBAN";
-                  nTab.value = contactData.properties.iban;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "BIC";
-                  nTab.value = contactData.properties.bic;
-                  tRole.tabs.textTabs.push(nTab);
-
-                  var nTab = new docusign.Text();
-                  nTab.tabLabel = "Bank";
-                  nTab.value = contactData.properties.bankname;
-                  tRole.tabs.textTabs.push(nTab);
-
-
+                    var mailSubject = replacePlaceholder(await settings.getSettingData('docusigndiamailsubject'), contactData.properties);
                     
+                    var mailBody = replacePlaceholder(await settings.getSettingData('docusigndiamailbody'), contactData.properties);
+                  }
 
-                  // create a list of template roles and add our newly created role
-                  var templateRolesList = [];
-                  templateRolesList.push(tRole);
+                  // Sent Contract
+                  var row = await database.awaitQuery(`SELECT * FROM access_token WHERE type = "docusign"`);
+                  docuSignApiClient.addDefaultHeader('Authorization', 'Bearer ' + row[0].access_token);
 
-                  // assign template role(s) to the envelope
-                  envDef.templateRoles = templateRolesList;
+                  try {
+                    var userInfo = await docuSignApiClient.getUserInfo(row[0].access_token);
+                    var accountId = userInfo.accounts[0].accountId;
+                    docuSignApiClient.setBasePath(userInfo.accounts[0].baseUri + "/restapi");
+                    docusign.Configuration.default.setDefaultApiClient(docuSignApiClient);
 
-                  // send the envelope by setting |status| to 'sent'. To save as a draft set to 'created'
-                  envDef.status = 'sent';
 
-                  // use the |accountId| we retrieved through the Login API to create the Envelope
-                  var accountId = accountId;
 
-                  // instantiate a new EnvelopesApi object
-                  var envelopesApi = new docusign.EnvelopesApi();
+                    console.log(date+" - done retrieving account info for user.");
 
-                  // call the createEnvelope() API
-                  envelopesApi.createEnvelope(accountId, { 'envelopeDefinition': envDef }, async function(err, envelopeSummary, response) {
-                    if (err) {
-                      // Set DocuSign Contract Status
-                      var properties = {
-                        "docusign_contract_status": "nicht gesendet",
-                      };
-                      var SimplePublicObjectInput = { properties };
-                      await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
-            
-                      errorlogging.saveError("error", "docusign", "Vertrag konnte nicht gesendet werden ("+dealId+")", err);
-                      console.log(date+" - "+err);
-                    }else{
-                      // Set DocuSign Contract Status
-                      var properties = {
-                        "docusign_contract_status": "erfolgreich gesendet",
-                        "deal_envelopeid": envelopeSummary.envelopeId
-                      };
-                      var SimplePublicObjectInput = { properties };
-                      await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
+                    // create a new envelope object that we will manage the signature request through
+                    var envDef = new docusign.EnvelopeDefinition();
+                    envDef.emailSubject = mailSubject;
+                    envDef.templateId = contractTemplateId;
+                    envDef.emailBlurb = mailBody;
 
-                      errorlogging.saveError("success", "docusign", "Vertrag erfolgreich gesendet ("+envelopeSummary.envelopeId+")", JSON.stringify(envelopeSummary));
-                      console.log(date+' - EnvelopeSummary: ' + JSON.stringify(envelopeSummary));
-                    }
-                  });
 
-                } catch (err) {
-                  errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", contactData.properties.email);
-                  console.log(date+" - "+err);
-                }             
+                    // create a template role with a valid templateId and roleName and assign signer info
+                    var tRole = new docusign.TemplateRole();
+                    tRole.roleName = 'HubSpot';
+                    tRole.name = contactData.properties.firstname+' '+contactData.properties.lastname;
+                    tRole.email = contactData.properties.email;
+
+
+                    // Set Template Fields
+                    tRole.tabs = new docusign.Tabs();
+                    tRole.tabs.textTabs = [];
+                    
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Firma_Contract";
+                    nTab.value = contactData.properties.company;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Address_Contract";
+                    nTab.value = contactData.properties.address;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Represent_Contract";
+                    nTab.value = contactData.properties.firstname+' '+contactData.properties.lastname+represent_contract_company;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Plz_Contract";
+                    nTab.value = contactData.properties.zip;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Postalcode_Contract";
+                    nTab.value = contactData.properties.zip;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "City_Contract";
+                    nTab.value = contactData.properties.city;
+                    tRole.tabs.textTabs.push(nTab);
+
+
+
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Firma_Vollmacht";
+                    nTab.value = contactData.properties.company;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Address_Vollmacht";
+                    nTab.value = contactData.properties.address;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Represent_Vollmacht";
+                    nTab.value = contactData.properties.firstname+' '+contactData.properties.lastname+represent_contract_company;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Plz_Vollmacht";
+                    nTab.value = contactData.properties.zip;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Postalcode_Vollmacht";
+                    nTab.value = contactData.properties.zip;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "City_Vollmacht";
+                    nTab.value = contactData.properties.city;
+                    tRole.tabs.textTabs.push(nTab);
+
+
+
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "IBAN";
+                    nTab.value = contactData.properties.iban;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "BIC";
+                    nTab.value = contactData.properties.bic;
+                    tRole.tabs.textTabs.push(nTab);
+
+                    var nTab = new docusign.Text();
+                    nTab.tabLabel = "Bank";
+                    nTab.value = contactData.properties.bankname;
+                    tRole.tabs.textTabs.push(nTab);
+
+
+                      
+
+                    // create a list of template roles and add our newly created role
+                    var templateRolesList = [];
+                    templateRolesList.push(tRole);
+
+                    // assign template role(s) to the envelope
+                    envDef.templateRoles = templateRolesList;
+
+                    // send the envelope by setting |status| to 'sent'. To save as a draft set to 'created'
+                    envDef.status = 'sent';
+
+                    // use the |accountId| we retrieved through the Login API to create the Envelope
+                    var accountId = accountId;
+
+                    // instantiate a new EnvelopesApi object
+                    var envelopesApi = new docusign.EnvelopesApi();
+
+                    // call the createEnvelope() API
+                    envelopesApi.createEnvelope(accountId, { 'envelopeDefinition': envDef }, async function(err, envelopeSummary, response) {
+                      if (err) {
+                        // Set DocuSign Contract Status
+                        var properties = {
+                          "docusign_contract_status": "nicht gesendet",
+                          "docusign_contract_status_fehler": "Vertrag konnte nicht gesendet werden"
+                        };
+                        var SimplePublicObjectInput = { properties };
+                        await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
+              
+                        errorlogging.saveError("error", "docusign", "Vertrag konnte nicht gesendet werden ("+dealId+")", err);
+                        console.log(date+" - "+err);
+                      }else{
+                        // Set DocuSign Contract Status
+                        var properties = {
+                          "docusign_contract_status": "erfolgreich gesendet",
+                          "deal_envelopeid": envelopeSummary.envelopeId,
+                          "docusign_contract_status_fehler": ""
+                        };
+                        var SimplePublicObjectInput = { properties };
+                        await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
+
+                        errorlogging.saveError("success", "docusign", "Vertrag erfolgreich gesendet ("+envelopeSummary.envelopeId+")", JSON.stringify(envelopeSummary));
+                        console.log(date+' - EnvelopeSummary: ' + JSON.stringify(envelopeSummary));
+                      }
+                    });
+
+                  } catch (err) {
+                    errorlogging.saveError("error", "docusign", "Error to load DocuSignAPI", contactData.properties.email);
+                    console.log(date+" - "+err);
+                  }  
+                }                         
               } catch (err) {
                 errorlogging.saveError("error", "hubspot", "Error to load the Contact Data ("+contactId+")", "");
                 console.log(date+" - "+err);
               }
+            
             }else{
               console.log(date+" - Contract already sent");
               errorlogging.saveError("error", "hubspot", "Contrac already sent ("+dealId+")", "");
