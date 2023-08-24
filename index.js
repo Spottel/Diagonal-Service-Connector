@@ -437,7 +437,7 @@ app.post('/hubspotwebhook', async (req, res) => {
                 // Check before create contract
                 var checkField = true;
                 var field_list = [];
-                var requireFields = ["email", "firstname", "lastname", "unternehmensform"];
+                var requireFields = ["email", "firstname", "lastname", "company", "address", "zip", "city", "unternehmensform"];
 
                 for(var i=0; i<requireFields.length; i++){
                   if(contactData.properties[requireFields[i]] == null || contactData.properties[requireFields[i]] == ""){
