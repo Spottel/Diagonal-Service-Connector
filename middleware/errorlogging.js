@@ -22,6 +22,10 @@ module.exports = {
       dayjs.extend(timezone)
       var date = dayjs().tz("Europe/Berlin").format('YYYY-MM-DD HH:mm:ss');
 
+      if(typeof information === 'object' && information !== null){
+        information = JSON.stringify(information);
+      }
+
       var error = {
         title: title,
         information: information
