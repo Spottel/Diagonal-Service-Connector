@@ -364,7 +364,11 @@ app.get('/registerHubSpotApp', async (req, res) => {
     axios({
       method: 'post',
       url: 'https://api.hubapi.com/oauth/v1/token',
-      data: formData
+      data: formData,
+      headers: {            
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'charset': 'utf-8'
+      }      
     })
       .then(async function(response) {
         res.sendFile(__dirname+"/public/successhubspotapp/index.html");
@@ -424,8 +428,7 @@ app.post('/hubspotwebhook', async (req, res) => {
             var dealData = await hubspotClient.crm.deals.basicApi.getById(dealId, properties, undefined, associations, false, undefined);
 
             // Check if Contract already sent
-            if(dealData.properties['docusign_contract_status'] == null || dealData.properties['docusign_contract_status'] == ""){
-              
+            if(dealData.properties['docusign_contract_status'] == null || dealData.properties['docusign_contract_status'] == "" || dealData.properties['docusign_contract_status'] == "nicht gesendet"){
               // Load Contact Data
               var contactId = dealData.associations.contacts.results[0].id;
 
@@ -511,6 +514,8 @@ app.post('/hubspotwebhook', async (req, res) => {
 
                     // create a new envelope object that we will manage the signature request through
                     var envDef = new docusign.EnvelopeDefinition();
+
+                    mailSubject = mailSubject.substring(0, 90);
                     envDef.emailSubject = mailSubject;
                     envDef.templateId = contractTemplateId;
                     envDef.emailBlurb = mailBody;
@@ -628,8 +633,12 @@ app.post('/hubspotwebhook', async (req, res) => {
                     var envelopesApi = new docusign.EnvelopesApi();
 
                     // call the createEnvelope() API
+
+      
                     envelopesApi.createEnvelope(accountId, { 'envelopeDefinition': envDef }, async function(err, envelopeSummary, response) {
                       if (err) {
+                        var errorText = JSON.parse(err.response.res.text);
+
                         // Set DocuSign Contract Status
                         var properties = {
                           "docusign_contract_status": "nicht gesendet",
@@ -638,8 +647,8 @@ app.post('/hubspotwebhook', async (req, res) => {
                         var SimplePublicObjectInput = { properties };
                         await hubspotClient.crm.deals.basicApi.update(dealId, SimplePublicObjectInput, undefined);
               
-                        errorlogging.saveError("error", "docusign", "Vertrag konnte nicht gesendet werden ("+dealId+")", err);
-                        console.log(date+" - "+err);
+                        errorlogging.saveError("error", "docusign", "Vertrag konnte nicht gesendet werden ("+dealId+")", errorText.message);
+                        console.log(date+" - "+errorText.message);
                       }else{
                         // Set DocuSign Contract Status
                         var properties = {
@@ -1322,79 +1331,90 @@ cron.schedule('*/5 * * * *', async function() {
 
     if(rows.length != 0){
       for(var i=6; i<rows.length;i++){
+        var importCol = '';
         var obj = rows[5].reduce((acc, cur, index) => {
           acc[cur] = rows[i][index];
+          if(cur == "Import"){
+            importCol = index+1;
+          }
           return acc;
         }, {});
 
 
-        if(obj['Import'] == null && obj['E-Mail'] != null){
-          // PHONE
-          var phone = obj['Telefonnummer'];
-    
-          if(phone != ""){
-            if(!phone.includes("+")){
-              if(phone.startsWith('00')){
-                phone = phone.slice(2);
-                phone = "+"+phone;
-              }else if(phone.startsWith('0')){
-                phone = phone.slice(1);
-                phone = "+49"+phone;
+        if(importCol == ""){
+          errorlogging.saveError("error", "saltybrands", "Import Col not found", {"test":"abc"});
+        }else{
+          var letter = String.fromCharCode(importCol + 64);
+
+          if(obj['Import'] == null && obj['E-Mail'] != null){
+            // PHONE
+            var phone = obj['Telefonnummer'];
+      
+            if(phone != ""){
+              if(!phone.includes("+")){
+                if(phone.startsWith('00')){
+                  phone = phone.slice(2);
+                  phone = "+"+phone;
+                }else if(phone.startsWith('0')){
+                  phone = phone.slice(1);
+                  phone = "+49"+phone;
+                }
               }
             }
-          }
-    
-          var properties = {
-              "company": obj['Firmenname'],
-              "email": obj['E-Mail'].trim(),
-              "firstname": obj['Vorname'],
-              "lastname": obj['Nachname'],
-              "phone": phone,
-              "country": "Deutschland",
-              "aktuelle_liste": "Neue Leads",
-              "lead_typ": "Einfacher Lead",
-              "lead_anbieter": "SaltyBrands",
-              "lead_quelle": "Gekaufte Leads: SaltyBrands",
-              "hs_lead_status": "NEW",
-              "saltybrands__haben_sie_offene_forderungen_": obj['Haben Sie offene Forderungen?'],
-              "saltybrands__wie_viele_transaktionen_haben_sie_im_monat_": obj['Wie viele offene Forderungen haben Sie im Monat?']
-            };
-    
-          var SimplePublicObjectInput = { properties };
-
-          try {
-            var apiResponse = await hubspotClient.crm.contacts.basicApi.create(SimplePublicObjectInput); 
+      
+            var properties = {
+                "company": obj['Firmenname'],
+                "email": obj['E-Mail'].trim(),
+                "firstname": obj['Vorname'],
+                "lastname": obj['Nachname'],
+                "phone": phone,
+                "country": "Deutschland",
+                "aktuelle_liste": "Neue Leads",
+                "lead_typ": "Einfacher Lead",
+                "lead_anbieter": "SaltyBrands",
+                "lead_quelle": "Gekaufte Leads: SaltyBrands",
+                "hs_lead_status": "NEW",
+                "saltybrands__haben_sie_offene_forderungen_": obj['Haben Sie offene Forderungen?'],
+                "saltybrands__wie_viele_transaktionen_haben_sie_im_monat_": obj['Wie viele offene Forderungen haben Sie im Monat?']
+              };
+      
+     
+            var SimplePublicObjectInput = { properties };
 
             try {
-              var response = (await sheets.spreadsheets.values.update({
-                spreadsheetId: await settings.getSettingData('googlesheetid'),
-                range: "LinkedIn!W"+(i+1),
-                valueInputOption: "USER_ENTERED",
-                requestBody: { values: [["success"]] },
-              })).data;
-  
-              console.log(JSON.stringify(response, null, 2));
-  
+              var apiResponse = await hubspotClient.crm.contacts.basicApi.create(SimplePublicObjectInput); 
+
+              try {
+                var response = (await sheets.spreadsheets.values.update({
+                  spreadsheetId: await settings.getSettingData('googlesheetid'),
+                  range: "LinkedIn!"+letter+(i+1),
+                  valueInputOption: "USER_ENTERED",
+                  requestBody: { values: [["success"]] },
+                })).data;
+    
+                console.log(JSON.stringify(response, null, 2));
+    
+              } catch (err) {
+                console.error(err);
+              }
+
+              console.log(date+" - Success: Google Sheet SaltyBrands Import");
+              errorlogging.saveError("success", "saltybrands", "Google Sheet SaltyBrands Import. ("+obj['E-Mail']+")", "");
             } catch (err) {
-              console.error(err);
-            }
+              if(err.body['message'].includes("Contact already exists")){
+                var response = (await sheets.spreadsheets.values.update({
+                  spreadsheetId: await settings.getSettingData('googlesheetid'),
+                  range: "LinkedIn!"+letter+(i+1),
+                  valueInputOption: "USER_ENTERED",
+                  requestBody: { values: [["success"]] },
+                })).data;
 
-            console.log(date+" - Success: Google Sheet SaltyBrands Import");
-            errorlogging.saveError("success", "saltybrands", "Google Sheet SaltyBrands Import. ("+obj['E-Mail']+")", "");
-          } catch (err) {
-            if(err.body['message'].includes("Contact already exists")){
-              var response = (await sheets.spreadsheets.values.update({
-                spreadsheetId: await settings.getSettingData('googlesheetid'),
-                range: "LinkedIn!W"+(i+1),
-                valueInputOption: "USER_ENTERED",
-                requestBody: { values: [["success"]] },
-              })).data;
-
-              errorlogging.saveError("error", "saltybrands", "Contact already exists. ("+obj['E-Mail']+")", "");
-            }else{
-              errorlogging.saveError("error", "saltybrands", "Not possibe to import. ("+obj['E-Mail']+")", err.body['message']);
-            }
-          }        
+                errorlogging.saveError("error", "saltybrands", "Contact already exists. ("+obj['E-Mail']+")", "");
+              }else{
+                errorlogging.saveError("error", "saltybrands", "Not possibe to import. ("+obj['E-Mail']+")", err.body['message']);
+              }
+            }      
+          }
         }
       }
     }
