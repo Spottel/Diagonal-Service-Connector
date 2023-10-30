@@ -3,6 +3,8 @@
 // ------------------------------------------
 const bcrypt = require("bcrypt");
 const database = require('./middleware/database.js');
+const databasePool = databaseConnector.createPool();
+const database = databaseConnector.getConnection();
 
 const username = process.env.npm_config_username;
 const password = process.env.npm_config_password;
@@ -23,8 +25,6 @@ if(username != undefined && password != undefined){
     createPasswordHash(password).then(
         (data) => {
             database.awaitQuery(`UPDATE users SET username = ?, password=? WHERE id = 1`, [username, data]);
+            console.log("Created successfully");
         });
 }
-
-
-
