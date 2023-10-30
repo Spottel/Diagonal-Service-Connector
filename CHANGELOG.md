@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/Spottel/Diagonal-Service-Connector/compare/v1.1.1...v1.1.2) (2023-10-30)
+
+
+### Bug Fixes
+
+* :bug: Error Handling ([e469078](https://github.com/Spottel/Diagonal-Service-Connector/commit/e469078415da4ea2162d051ec3fa05a395f06779))
+
 ## [1.1.1](https://github.com/Spottel/Diagonal-Service-Connector/compare/v1.1.0...v1.1.1) (2023-08-23)
 
 
